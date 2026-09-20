@@ -55,12 +55,20 @@ partnerActs = {
     AUTO = 8,
 }
 eventHooks = {
-    PARTNER_BEFORE_UPDATE = 0, -- called before a partner's action routine. passes partner Object `o` and parent MarioState `m`
-    PARTNER_UPDATE = 1,        -- called after a partner's action routine. passes partner Object `o` and parent MarioState `m`
+    -- Called before a partner's action routine.
+    -- Passes partner Object `o` and parent MarioState `m`
+    PARTNER_BEFORE_UPDATE = 0,
+    -- Called after a partner's action routine.
+    -- Passes partner Object `o` and parent MarioState `m`
+    PARTNER_UPDATE = 1,
     PARTNER_SPAWNED = 2,
     PARTNER_DESPAWNED = 3,
-    TRY_SWAP_LEADER = 4, -- called when the player tries to swap the active leader, before the swap actually occurs. return `false` to cancel the swap.
-    ON_SWAP_LEADER = 5,  -- called upon swapping the active leader
+    -- Called when the local player tries to swap the active leader, before the swap actually occurs. return `false` to cancel the swap.
+    -- Passes the character IDs of the current leader and partner.
+    TRY_SWAP_LEADER = 4,
+    -- Called upon the local player swapping the active leader.
+    -- Passes partner Object `o` and parent MarioState `m`
+    ON_SWAP_LEADER = 5,
 }
 
 hookedFunctions = {}
@@ -1092,6 +1100,8 @@ function swap_leader()
 
     network_send_object(localPartnerObj, true)
     set_character_animation(m, -1)
+
+    call_event_hook(eventHooks.ON_SWAP_LEADER, localPartnerObj, m)
 end
 
 local syncValid = false

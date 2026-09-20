@@ -39,6 +39,7 @@ end
 
 ---@param eventHook integer
 ---@param func function
+--- Hook a function to run during certain mod events. See `partnersAPI.eventHooks`
 function partnersAPI.hook_partner_event(eventHook, func)
     if not hookedFunctions[eventHook] then
         hookedFunctions[eventHook] = {}
