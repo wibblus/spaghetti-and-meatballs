@@ -194,20 +194,18 @@ local function character_obj_play_sound(o, charSound)
     if not o or o.oIsChar == 0 then return end
     local char = characterTable[o.oCharNum][o.oCharAlt]
     if charSelect.character_get_voice(char.model) then
-        local prevModel = charSelect.gCSPlayers[m.playerIndex].modelId
-        local prevPos = { x = m.pos.x, y = m.pos.y, z = m.pos.z }
+        local p = charSelect.gCSPlayers[0]
+        local prevModel = p.modelId
+        local prevCamPos = gVec3fZero()
+        vec3f_copy(prevCamPos, m.marioObj.header.gfx.cameraToObject)
 
-        charSelect.gCSPlayers[m.playerIndex].modelId = char.model
-        m.pos.x = o.oPosX
-        m.pos.y = o.oPosY
-        m.pos.z = o.oPosZ
+        p.modelId = char.model
+        vec3f_copy(m.marioObj.header.gfx.cameraToObject, o.header.gfx.cameraToObject)
 
-        play_character_sound(m, charSound)
+        charSelect.voice.sound(m, charSound, { x = o.oPosX, y = o.oPosY, z = o.oPosZ })
 
-        charSelect.gCSPlayers[m.playerIndex].modelId = prevModel
-        m.pos.x = prevPos.x
-        m.pos.y = prevPos.y
-        m.pos.z = prevPos.z
+        p.modelId = prevModel
+        vec3f_copy(m.marioObj.header.gfx.cameraToObject, prevCamPos)
     else
         play_sound(gCharacters[char.baseChar][varToChar[charSound]], o.header.gfx.cameraToObject)
     end
@@ -441,7 +439,7 @@ hook_event(HOOK_ON_GEO_PROCESS, reset_mario_body_state)
 hook_event(HOOK_ON_OBJECT_UNLOAD, function(o)
     charModelData[o] = nil
 end)
-hook_event(HOOK_ON_LEVEL_INIT, function ()
+hook_event(HOOK_ON_LEVEL_INIT, function()
     charModelData = {}
 end)
 

@@ -25,11 +25,21 @@ define_custom_obj_fields({
     oPartnerSquishTimer = "u32",
 })
 
+-- TODO LIST !!!
+
+-- set partner action when knocked out of a level, depending on player action type
+-- custom action when a player warps into a level, use BBH entrance animation
+-- sync CS menu animation for partners
+
 gPartnerData = {}
 
-gActivePartners = {}
+--gActivePartners = {}
 for i = 0, MAX_PLAYERS - 1 do
-    gActivePartners[i] = { active = false, leaderChar = CT_MARIO, partnerChar = CT_LUIGI }
+    --gActivePartners[i] = { active = false, leaderChar = CT_MARIO, partnerChar = CT_LUIGI }
+    local p = gPlayerSyncTable[i]
+    p.active = p.active or false
+    p.leaderChar = p.leaderChar or CT_MARIO
+    p.partnerChar = p.partnerChar or CT_LUIGI
 end
 
 local characterTable = charSelect.character_get_full_table()
@@ -298,8 +308,7 @@ local function partner_act_warp(o, m)
         end
 
         if i == 16 then
-            o.oPosY = m.pos.y + 20.0
-            break
+            return
         end
         offsetAngle = s16(offsetAngle + 0x1000)
     end
@@ -668,6 +677,7 @@ local function partner_act_cutscene(o, m)
     if m.action & ACT_GROUP_MASK ~= ACT_GROUP_CUTSCENE then
         set_partner_action(o, partnerActs.IDLE)
     end
+    charObjs.character_obj_set_animation(o, o.oCharAnim)
 end
 
 local KB_ANIMS = { [0] = { CHAR_ANIM_BACKWARD_KB, CHAR_ANIM_BACKWARD_AIR_KB }, { CHAR_ANIM_FORWARD_KB, CHAR_ANIM_AIR_FORWARD_KB } }
@@ -956,8 +966,9 @@ local function bhv_partner_loop(o)
         end
     end
 
+    local np = gNetworkPlayers[m.playerIndex]
+
     if o.oCharPalette == 0 then
-        local np = gNetworkPlayers[m.playerIndex]
         for i = PANTS, EMBLEM do
             modelData.palette[i] = network_player_get_palette_color(np, i)
         end
@@ -992,7 +1003,7 @@ local function bhv_partner_loop(o)
         o.header.gfx.animInfo.animYTrans = o.header.gfx.animInfo.curAnim.animYTransDivisor
     end
 
-    if not gActivePartners[m.playerIndex].active then
+    if not gPlayerSyncTable[m.playerIndex].active or not np.connected or not np.currAreaSyncValid then
         obj_mark_for_deletion(o)
 
         if m.playerIndex == 0 then
@@ -1008,7 +1019,7 @@ id_bhvPartnerFaker = hook_behavior(nil, OBJ_LIST_GENACTOR, true, bhv_partner_ini
 
 ---@type MarioState
 local m = gMarioStates[0]
-local p = gActivePartners[0]
+local p = gPlayerSyncTable[0]
 
 local function try_spawn_partner_obj()
     local partnerCharNum = p.partnerChar
@@ -1153,11 +1164,10 @@ local function update()
 
     if localPartnerObj and localPartnerObj.oIsChar ~= 0 then
         if m.controller.buttonPressed & L_TRIG ~= 0 and swapState == 0 then
-            local deltaFloorHeight = localPartnerObj.oPosY -
-                find_floor_height(localPartnerObj.oPosX, localPartnerObj.oPosY, localPartnerObj.oPosZ)
             if m.action & (ACT_FLAG_INVULNERABLE | ACT_FLAG_INTANGIBLE) ~= 0
                 or localPartnerObj.oAction == partnerActs.WARP or localPartnerObj.oAction > partnerActs.AIRBORNE
-                or deltaFloorHeight > 500.0
+                or localPartnerObj.oDistanceToMario > 600.0 or abs(m.pos.y - localPartnerObj.oPosY) > 400.0
+                or localPartnerObj.oPosY - find_floor_height(localPartnerObj.oPosX, localPartnerObj.oPosY, localPartnerObj.oPosZ) > 250.0
             then
                 play_sound_with_freq_scale(SOUND_MENU_CAMERA_BUZZ, gGlobalSoundSource, 1.5)
                 return
