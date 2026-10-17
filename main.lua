@@ -27,8 +27,6 @@ define_custom_obj_fields({
 
 -- TODO LIST !!!
 
--- set partner action when knocked out of a level, depending on player action type
--- custom action when a player warps into a level, use BBH entrance animation
 -- sync CS menu animation for partners
 
 gPartnerData = {}
@@ -62,7 +60,8 @@ partnerActs = {
     CUTSCENE = 5,
     ATTACKED = 6,
     SQUISHED = 7,
-    AUTO = 8,
+    ENTER_LEVEL = 8,
+    AUTO = 9,
 }
 eventHooks = {
     -- Called before a partner's action routine.
@@ -71,7 +70,11 @@ eventHooks = {
     -- Called after a partner's action routine.
     -- Passes partner Object `o` and parent MarioState `m`
     PARTNER_UPDATE = 1,
+    -- Called when a partner object is spawned.
+    -- Passes partner Object `o` and parent MarioState `m`
     PARTNER_SPAWNED = 2,
+    -- Called when a partner object is set to despawn at the end of the frame.
+    -- Passes partner Object `o` and parent MarioState `m`
     PARTNER_DESPAWNED = 3,
     -- Called when the local player tries to swap the active leader, before the swap actually occurs. return `false` to cancel the swap.
     -- Passes the character IDs of the current leader and partner.
@@ -221,6 +224,10 @@ function set_partner_action(o, act, subAct)
     if o.oAction ~= partnerActs.AIRBORNE then
         o.oPartnerJumpState = 0
     end
+    o.oFaceAnglePitch = 0
+    o.oFaceAngleRoll = 0
+    o.oPartnerTorsoPitch = 0
+    o.oPartnerTorsoRoll = 0
 
     o.oPrevAction = act
     o.oAction = act
@@ -284,6 +291,8 @@ local function bhv_partner_init(o)
     network_init_object(o, true,
         { "oCharNum", "oCharAlt", "oCharPalette", "oPartnerJumpState", "oPartnerJumpQueue", "oPartnerSquishTimer",
             "oBooTargetOpacity" })
+
+    call_event_hook(eventHooks.PARTNER_SPAWNED, o, gMarioStates[network_local_index_from_global(o.oBehParams)])
 end
 
 ---@param o Object
@@ -296,6 +305,11 @@ local function partner_act_warp(o, m)
             o.oSubAction = 1
         end
         return
+    end
+
+    if PARTNER_ACT_TRIGGERS[m.action] then
+        PARTNER_ACT_TRIGGERS[m.action](o)
+        o.oBooTargetOpacity = 0xFF
     end
 
     local offsetAngle = m.faceAngle.y
@@ -722,6 +736,31 @@ local function partner_act_squished(o)
 end
 
 ---@param o Object
+---@param m MarioState
+local function partner_act_enter_level(o, m)
+    if o.oTimer <= 4 then
+        o.oMoveAnglePitch = -0x4000
+        o.oForwardVel = 32.0
+
+        charObjs.character_obj_set_animation(o, CHAR_ANIM_FORWARD_SPINNING)
+    else
+        o.oMoveAnglePitch = approach_s16_asymptotic(o.oMoveAnglePitch, -atan2s(o.oDistanceToMario, m.pos.y - o.oPosY), 8)
+        o.oMoveAngleYaw = approach_s16_asymptotic(o.oMoveAngleYaw, atan2s(m.pos.z - o.oPosZ, m.pos.x - o.oPosX), 8)
+
+        charObjs.character_obj_set_animation(o, CHAR_ANIM_DIVE)
+        o.oFaceAnglePitch = o.oMoveAnglePitch
+        --o.oFaceAngleRoll = o.oFaceAngleRoll + 0x800
+        o.oBooTargetOpacity = 0x00
+    end
+
+    o.oIntangibleTimer = 3
+
+    o.oPosX = o.oPosX + sins(o.oMoveAngleYaw) * coss(o.oMoveAnglePitch) * o.oForwardVel
+    o.oPosY = o.oPosY + -sins(o.oMoveAnglePitch) * o.oForwardVel
+    o.oPosZ = o.oPosZ + coss(o.oMoveAngleYaw) * coss(o.oMoveAnglePitch) * o.oForwardVel
+end
+
+---@param o Object
 local function partner_act_auto(o)
     o.oForwardVel = 0.0
     o.oVelY = 0.0
@@ -825,6 +864,7 @@ partnerActTable = {
     [partnerActs.CUTSCENE] = partner_act_cutscene,
     [partnerActs.ATTACKED] = partner_act_attacked,
     [partnerActs.SQUISHED] = partner_act_squished,
+    [partnerActs.ENTER_LEVEL] = partner_act_enter_level,
     [partnerActs.AUTO] = partner_act_auto,
 }
 
@@ -872,12 +912,6 @@ local function bhv_partner_loop(o)
         end
     end
     cur_obj_update_floor()
-
-    if o.oAction ~= partnerActs.WALKING then
-        o.oFaceAnglePitch = 0
-        o.oPartnerTorsoPitch = 0
-        o.oPartnerTorsoRoll = 0
-    end
 
     if o.oAction ~= partnerActs.WARP then
         if o.oPartnerJumpQueue > 0 then
@@ -1005,6 +1039,8 @@ local function bhv_partner_loop(o)
 
     if not gPlayerSyncTable[m.playerIndex].active or not np.connected or not np.currAreaSyncValid then
         obj_mark_for_deletion(o)
+
+        call_event_hook(eventHooks.PARTNER_DESPAWNED, o, gMarioStates[network_local_index_from_global(o.oBehParams)])
 
         if m.playerIndex == 0 then
             localPartnerObj = nil
@@ -1285,20 +1321,61 @@ local function mario_update(hookM)
 end
 hook_event(HOOK_MARIO_UPDATE, mario_update)
 
-local JUMP_ACTS = {
-    [ACT_JUMP] = 1,
-    [ACT_DOUBLE_JUMP] = 1,
-    [ACT_TRIPLE_JUMP] = 1,
-    [ACT_LONG_JUMP] = 1,
-    [ACT_BACKFLIP] = 1,
+local function act_trigger_jump(o)
+    if o.oPartnerJumpQueue == 0 and o.oDistanceToMario < 1000.0 then
+        o.oPartnerJumpQueue = 4 + (o.oDistanceToMario // 50)
+    end
+end
+
+local function act_trigger_enter_level(o)
+    set_partner_action(o, partnerActs.ENTER_LEVEL)
+
+    o.oMoveAnglePitch = -0x4000
+end
+
+local function act_trigger_star_dance(o)
+    set_partner_action(o, partnerActs.CUTSCENE)
+    o.oCharAnim = CHAR_ANIM_STAR_DANCE
+end
+
+local function act_trigger_death_exit(o)
+    set_partner_action(o, partnerActs.ATTACKED)
+
+    o.oForwardVel = m.forwardVel
+    o.oVelY = m.vel.y
+    o.oMoveAngleYaw = m.faceAngle.y
+end
+
+local function act_trigger_star_exit(o)
+    set_partner_action(o, partnerActs.AIRBORNE)
+
+    o.oForwardVel = m.forwardVel
+    o.oVelY = m.vel.y + 16.0
+    o.oMoveAngleYaw = m.faceAngle.y
+end
+
+PARTNER_ACT_TRIGGERS = {
+    [ACT_JUMP] = act_trigger_jump,
+    [ACT_DOUBLE_JUMP] = act_trigger_jump,
+    [ACT_TRIPLE_JUMP] = act_trigger_jump,
+    [ACT_LONG_JUMP] = act_trigger_jump,
+    [ACT_BACKFLIP] = act_trigger_jump,
+    [ACT_DISAPPEARED] = act_trigger_enter_level,
+    [ACT_BBH_ENTER_SPIN] = act_trigger_enter_level,
+    [ACT_STAR_DANCE_NO_EXIT] = act_trigger_star_dance,
+    [ACT_STAR_DANCE_EXIT] = act_trigger_star_dance,
+    [ACT_DEATH_EXIT] = act_trigger_death_exit,
+    [ACT_SPECIAL_DEATH_EXIT] = act_trigger_death_exit,
+    [ACT_EXIT_AIRBORNE] = act_trigger_star_exit,
+    [ACT_SPECIAL_EXIT_AIRBORNE] = act_trigger_star_exit,
 }
 
 local function on_set_action(hookM)
     if hookM.playerIndex ~= 0 or not localPartnerObj then return end
 
-    if JUMP_ACTS[m.action] and localPartnerObj.oPartnerJumpQueue == 0 and localPartnerObj.oDistanceToMario < 1000.0 then
-        localPartnerObj.oPartnerJumpQueue = 4 + (localPartnerObj.oDistanceToMario // 50)
-        network_send_object(localPartnerObj, false)
+    if PARTNER_ACT_TRIGGERS[m.action] then
+        PARTNER_ACT_TRIGGERS[m.action](localPartnerObj)
+        --network_send_object(localPartnerObj, false)
     end
 end
 hook_event(HOOK_ON_SET_MARIO_ACTION, on_set_action)
@@ -1409,6 +1486,8 @@ local function on_hud_render()
         local width = djui_hud_get_screen_width()
         local height = djui_hud_get_screen_height()
         local margin = 4
+
+        if localPartnerObj.oOpacity < 0x10 then return end
 
         djui_hud_world_pos_to_screen_pos({
             x = localPartnerObj.oPosX,
